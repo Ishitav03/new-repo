@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+// LoginForm.js
+import React, { useState } from 'react';
 import axios from 'axios';
 
-const Login = ({ setLoggedIn }) => {
+const LoginForm = ({ setLoggedIn }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
 
     const handleLogin = async () => {
         try {
             const response = await axios.post('/api/login', { username, password });
-            const { accessToken } = response.data;
-            localStorage.setItem('accessToken', accessToken);
+            const { jwtToken } = response.data;
+            localStorage.setItem('jwtToken', jwtToken);
             setLoggedIn(true); // Set logged in state to true
         } catch (error) {
             // Handle login error
@@ -37,7 +38,35 @@ const Login = ({ setLoggedIn }) => {
     );
 };
 
-const HomePage = ({ userData }) => {
+export default LoginForm;
+jsx
+Copy code
+// UserData.js
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
+
+const UserData = () => {
+    const [userData, setUserData] = useState(null);
+
+    useEffect(() => {
+        const fetchUserData = async () => {
+            try {
+                const token = localStorage.getItem('jwtToken');
+                const response = await axios.get('/api/user', {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+                setUserData(response.data);
+            } catch (error) {
+                // Handle error
+                console.error('Failed to fetch user data:', error);
+            }
+        };
+
+        fetchUserData();
+    }, []);
+
     return (
         <div>
             <h2>Welcome to the HomePage</h2>
@@ -47,50 +76,23 @@ const HomePage = ({ userData }) => {
     );
 };
 
+export default UserData;
+jsx
+Copy code
+// App.js
+import React, { useState } from 'react';
+import LoginForm from './LoginForm';
+import UserData from './UserData';
+
 const App = () => {
     const [loggedIn, setLoggedIn] = useState(false);
-    const [userData, setUserData] = useState(null);
-
-    const fetchUserData = async () => {
-        try {
-            const token = localStorage.getItem('accessToken');
-            const response = await axios.get('/api/user', {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            setUserData(response.data);
-        } catch (error) {
-            // Handle error
-            console.error('Failed to fetch user data:', error);
-        }
-    };
-
-    useEffect(() => {
-        if (loggedIn) {
-            fetchUserData();
-        }
-    }, [loggedIn]);
-
-    axios.interceptors.request.use(
-        (config) => {
-            const token = localStorage.getItem('accessToken');
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
-            return config;
-        },
-        (error) => {
-            return Promise.reject(error);
-        }
-    );
 
     return (
         <div>
             {loggedIn ? (
-                <HomePage userData={userData} />
+                <UserData />
             ) : (
-                <Login setLoggedIn={setLoggedIn} />
+                <LoginForm setLoggedIn={setLoggedIn} />
             )}
         </div>
     );
