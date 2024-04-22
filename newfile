@@ -1,0 +1,99 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const Login = ({ setLoggedIn }) => {
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
+
+    const handleLogin = async () => {
+        try {
+            const response = await axios.post('/api/login', { username, password });
+            const { accessToken } = response.data;
+            localStorage.setItem('accessToken', accessToken);
+            setLoggedIn(true); // Set logged in state to true
+        } catch (error) {
+            // Handle login error
+            console.error('Login failed:', error);
+        }
+    };
+
+    return (
+        <div>
+            <h2>Login</h2>
+            <input
+                type="text"
+                placeholder="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+            />
+            <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+            />
+            <button onClick={handleLogin}>Login</button>
+        </div>
+    );
+};
+
+const HomePage = ({ userData }) => {
+    return (
+        <div>
+            <h2>Welcome to the HomePage</h2>
+            <p>User Data:</p>
+            <pre>{JSON.stringify(userData, null, 2)}</pre>
+        </div>
+    );
+};
+
+const App = () => {
+    const [loggedIn, setLoggedIn] = useState(false);
+    const [userData, setUserData] = useState(null);
+
+    const fetchUserData = async () => {
+        try {
+            const token = localStorage.getItem('accessToken');
+            const response = await axios.get('/api/user', {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            setUserData(response.data);
+        } catch (error) {
+            // Handle error
+            console.error('Failed to fetch user data:', error);
+        }
+    };
+
+    useEffect(() => {
+        if (loggedIn) {
+            fetchUserData();
+        }
+    }, [loggedIn]);
+
+    axios.interceptors.request.use(
+        (config) => {
+            const token = localStorage.getItem('accessToken');
+            if (token) {
+                config.headers.Authorization = `Bearer ${token}`;
+            }
+            return config;
+        },
+        (error) => {
+            return Promise.reject(error);
+        }
+    );
+
+    return (
+        <div>
+            {loggedIn ? (
+                <HomePage userData={userData} />
+            ) : (
+                <Login setLoggedIn={setLoggedIn} />
+            )}
+        </div>
+    );
+};
+
+export default App;
