@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import './FileUploadBox.css';
 
 const FileUploadBox = () => {
   const [files, setFiles] = useState([]);
-  const [fileType, setFileType] = useState('csv');
 
   const onDrop = useCallback((acceptedFiles) => {
     const updatedFiles = acceptedFiles.map((file) => ({
@@ -13,77 +12,13 @@ const FileUploadBox = () => {
       preview: file.type.startsWith("image/")
         ? URL.createObjectURL(file)
         : null,
-      size: (file.size / 1024).toFixed(2) + " kb",
+      size: (file.size / 1024).toFixed(2) + " KB",
       progress: 0,
-      status: 'pending'
+      conversionType: null,
     }));
 
     setFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
-
-    updatedFiles.forEach(uploadFile);
   }, []);
-
-  const uploadFile = (fileObj) => {
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const fileContent = event.target.result;
-      const data = {
-        data: fileContent,
-        fileType: fileType,
-      };
-
-      try {
-        const response = await axios.post('http://localhost:8080/api/convert', data, {
-          responseType: 'blob',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        let file;
-        if(fileType === 'excel'){
-          file = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        } else if(fileType === 'csv'){
-          file = new Blob([response.data], { type: `text/csv` });
-        } else if(fileType === 'pdf'){
-          file = new Blob([response.data], { type: `application/pdf` });
-        }
-
-        // Create an URL for the file
-        const fileURL = URL.createObjectURL(file);
-        // Create a temporary link to trigger the download
-        const fileLink = document.createElement('a');
-        fileLink.href = fileURL;
-        if(fileType === 'excel') {
-          fileLink.setAttribute('download', 'file.xlsx');
-        } else if(fileType === 'csv'){
-          fileLink.setAttribute('download', 'file.csv'); // or any other extension
-        } else if(fileType === 'pdf') {
-          fileLink.setAttribute('download', 'file.pdf');
-        }
-        document.body.appendChild(fileLink);
-        fileLink.click();
-        document.body.removeChild(fileLink);
-      } catch (error) {
-        alert('Invalid JSON');
-      }
-    };
-
-    reader.readAsText(fileObj.file);
-  };
-
-  const handleConversionTypeChange = (file, conversionType) => {
-    setFiles((prevFiles) =>
-      prevFiles.map((prevFile) =>
-        prevFile.file === file ? { ...prevFile, conversionType } : prevFile
-      )
-    );
-  };
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    multiple: true,
-  });
 
   useEffect(() => {
     // Clean up function to revoke object URLs
@@ -96,6 +31,77 @@ const FileUploadBox = () => {
     };
   }, [files]);
 
+  const handleConversionTypeChange = (file, conversionType) => {
+    setFiles((prevFiles) =>
+      prevFiles.map((prevFile) =>
+        prevFile.file === file ? { ...prevFile, conversionType } : prevFile
+      )
+    );
+  };
+
+  const handleFileUpload = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file.file);
+
+    try {
+      const response = await axios.post("http://localhost:8080/api/upload", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        onUploadProgress: (progressEvent) => {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          setFiles((prevFiles) =>
+            prevFiles.map((prevFile) =>
+              prevFile.file === file.file
+                ? { ...prevFile, progress }
+                : prevFile
+            )
+          );
+        },
+      });
+
+      // Assuming the backend returns a file ID or name
+      return response.data.fileName;
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      return null;
+    }
+  };
+
+  const handleSubmit = async () => {
+    for (const file of files) {
+      if (file.conversionType) {
+        const fileName = await handleFileUpload(file);
+        if (fileName) {
+          try {
+            const response = await axios.post("http://localhost:8080/api/convert", {
+              fileName,
+              conversionType: file.conversionType,
+            }, {
+              responseType: "blob",
+            });
+
+            const blob = new Blob([response.data], { type: response.headers['content-type'] });
+            const downloadUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = `${file.file.name.split('.')[0]}.${file.conversionType}`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          } catch (error) {
+            console.error("Error converting file:", error);
+          }
+        }
+      }
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    multiple: true,
+  });
+
   return (
     <div className="upload-container">
       <div {...getRootProps()} className={`dropzone ${isDragActive ? "active" : ""}`}>
@@ -103,15 +109,8 @@ const FileUploadBox = () => {
         {isDragActive ? (
           <p>Drop files here ...</p>
         ) : (
-          <p>Drop JSON files here / Click to select JSON files</p>
+          <p>Drop files here / click to select files</p>
         )}
-      </div>
-      <div>
-        <select value={fileType} onChange={(e) => setFileType(e.target.value)}>
-          <option value="csv">CSV</option>
-          <option value="pdf">PDF</option>
-          <option value="excel">Excel</option>
-        </select>
       </div>
       {files.map((file) => (
         <div className="file-container" key={file.file.name}>
@@ -163,6 +162,7 @@ const FileUploadBox = () => {
           </div>
         </div>
       ))}
+      <button onClick={handleSubmit}>Submit</button>
     </div>
   );
 };
