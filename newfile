@@ -1,101 +1,283 @@
-// LoginForm.js
-import React, { useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
+import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
+import './FileUploadBox.css';
 
-const LoginForm = ({ setLoggedIn }) => {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
+const FileUploadBox = () => {
+  const [files, setFiles] = useState([]);
+  const [invalidFiles, setInvalidFiles] = useState([]);
+  const [fileType, setFileType] = useState("");
 
-    const handleLogin = async () => {
+  const onDrop = useCallback(acceptedFiles => {
+    const updatedFiles = acceptedFiles.map(file => ({
+      file: file,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      size: (file.size / 1024).toFixed(2) + ' KB',
+      progress: 0,
+      conversionType: null,
+      status: 'pending'
+    }));
+
+    const validatedFiles = validateFiles(updatedFiles);
+    const validFiles = validatedFiles.validFiles;
+    const invalidFiles = validatedFiles.invalidFiles;
+
+    setFiles(prevFiles => [...prevFiles, ...validFiles]);
+    setInvalidFiles(prevInvalidFiles => [...prevInvalidFiles, ...invalidFiles]);
+
+    validFiles.forEach(uploadFile);
+  }, []);
+
+  const validateFiles = (files) => {
+    let validFiles = [];
+    let invalidFiles = [];
+
+    files.forEach(file => {
+      if (file.file.type === 'application/json') {
+        validFiles.push(file);
+      } else {
         try {
-            const response = await axios.post('/api/login', { username, password });
-            const { jwtToken } = response.data;
-            localStorage.setItem('jwtToken', jwtToken);
-            setLoggedIn(true); // Set logged in state to true
+          JSON.parse(file.file.name);
+          validFiles.push(file);
         } catch (error) {
-            // Handle login error
-            console.error('Login failed:', error);
+          invalidFiles.push(file);
         }
+      }
+    });
+
+    return { validFiles, invalidFiles };
+  };
+
+  const uploadFile = (fileObj) => {
+    const formData = new FormData();
+    formData.append('file', fileObj.file);
+
+    axios.post('http://localhost:8080/api/upload', formData, {
+      onUploadProgress: (progressEvent) => {
+        const progress = (progressEvent.loaded / progressEvent.total) * 100;
+        setFiles(prevFiles => prevFiles.map(prevFile =>
+          prevFile.file === fileObj.file
+            ? { ...prevFile, progress }
+            : prevFile
+        ));
+      }
+    })
+    .then(response => {
+      setFiles(prevFiles => prevFiles.map(prevFile =>
+        prevFile.file === fileObj.file
+          ? { ...prevFile, status: 'uploaded', serverFileName: response.data.fileName }
+          : prevFile
+      ));
+    })
+    .catch(error => {
+      console.error("Error uploading file:", error);
+      setFiles(prevFiles => prevFiles.map(prevFile =>
+        prevFile.file === fileObj.file
+          ? { ...prevFile, status: 'error' }
+          : prevFile
+      ));
+    });
+  };
+
+  const handleConversionTypeChange = (file, conversionType) => {
+    setFiles(prevFiles =>
+      prevFiles.map(prevFile =>
+        prevFile.file === file ? { ...prevFile, conversionType } : prevFile
+      )
+    );
+  };
+
+  const convertFile = (file) => {
+    axios.post('http://localhost:8080/api/convert', {
+      fileName: file.serverFileName,
+      conversionType: file.conversionType
+    })
+    .then(response => {
+      const { downloadUrl } = response.data;
+      window.open(downloadUrl, '_blank');
+    })
+    .catch(error => {
+      console.error("Error converting file:", error);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      files.forEach(file => {
+        if (file.preview) {
+          URL.revokeObjectURL(file.preview);
+        }
+      });
     };
+  }, [files]);
 
-    return (
-        <div>
-            <h2>Login</h2>
-            <input
-                type="text"
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-            />
-            <button onClick={handleLogin}>Login</button>
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: '.json,application/json,text/plain',
+    multiple: true
+  });
+
+  return (
+    <div className="upload-container">
+      <div
+        {...getRootProps()}
+        className={`dropzone ${isDragActive ? 'active' : ''}`}
+      >
+        <input {...getInputProps()} />
+        {isDragActive ? (
+          <p>Drop files here ...</p>
+        ) : (
+          <p>Drop JSON files here / Click to select JSON files</p>
+        )}
+      </div>
+      {invalidFiles.length > 0 && (
+        <div className="invalid-files">
+          <h3>Invalid Files:</h3>
+          <ul>
+            {invalidFiles.map((invalidFile, index) => (
+              <li key={index}>{invalidFile.file.name}</li>
+            ))}
+          </ul>
+          <p>Accepted formats: JSON file, JSON text</p>
         </div>
-    );
-};
-
-export default LoginForm;
-jsx
-Copy code
-// UserData.js
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const UserData = () => {
-    const [userData, setUserData] = useState(null);
-
-    useEffect(() => {
-        const fetchUserData = async () => {
-            try {
-                const token = localStorage.getItem('jwtToken');
-                const response = await axios.get('/api/user', {
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
-                });
-                setUserData(response.data);
-            } catch (error) {
-                // Handle error
-                console.error('Failed to fetch user data:', error);
-            }
-        };
-
-        fetchUserData();
-    }, []);
-
-    return (
-        <div>
-            <h2>Welcome to the HomePage</h2>
-            <p>User Data:</p>
-            <pre>{JSON.stringify(userData, null, 2)}</pre>
-        </div>
-    );
-};
-
-export default UserData;
-jsx
-Copy code
-// App.js
-import React, { useState } from 'react';
-import LoginForm from './LoginForm';
-import UserData from './UserData';
-
-const App = () => {
-    const [loggedIn, setLoggedIn] = useState(false);
-
-    return (
-        <div>
-            {loggedIn ? (
-                <UserData />
+      )}
+      {files.map(file => (
+        <div className="file-container" key={file.file.name}>
+          <div className="file-preview">
+            {file.preview ? (
+              <img
+                src={file.preview}
+                alt={file.file.name}
+                className="preview-image"
+              />
             ) : (
-                <LoginForm setLoggedIn={setLoggedIn} />
+              <div className="file-icon">
+                <p>{file.file.name}</p>
+              </div>
             )}
+            <div className="file-details">
+              <div className="file-detail">
+                <strong>Name:</strong> {file.file.name}
+              </div>
+              <div className="file-detail">
+                <strong>Size:</strong> {file.size}
+              </div>
+              <div className="file-detail">
+                <strong>Status:</strong> {file.progress}%
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress"
+                  style={{ width: `${file.progress}%` }}
+                ></div>
+              </div>
+              {file.status === 'uploaded' && (
+                <div className="conversion-options">
+                  <label>Convert to:</label>
+                  <select
+                    value={file.conversionType || ''}
+                    onChange={(e) => handleConversionTypeChange(file, e.target.value)}
+                  >
+                    <option value="">Select...</option>
+                    <option value="csv">CSV</option>
+                    <option value="txt">TXT</option>
+                    <option value="xml">XML</option>
+                    <option value="pdf">PDF</option>
+                    <option value="doc">DOC</option>
+                  </select>
+                  {file.conversionType && (
+                    <button onClick={() => convertFile(file)}>Convert</button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-    );
+      ))}
+    </div>
+  );
 };
 
-export default App;
+export default FileUploadBox;
+
+
+
+.upload-container {
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.dropzone {
+  border: 2px dashed #ccc;
+  padding: 20px;
+  text-align: center;
+}
+
+.dropzone.active {
+  background-color: #f0f0f0;
+}
+
+.invalid-files {
+  margin-top: 20px;
+  color: red;
+}
+
+.file-container {
+  display: flex;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.file-preview {
+  display: flex;
+  align-items: center;
+}
+
+.preview-image {
+  width: 50px;
+  height: 50px;
+  margin-right: 20px;
+}
+
+.file-icon {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f0f0f0;
+  margin-right: 20px;
+}
+
+.file-details {
+  flex-grow: 1;
+}
+
+.file-detail {
+  margin-bottom: 5px;
+}
+
+.progress-bar {
+  width: 100%;
+  background-color: #f0f0f0;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress {
+  height: 100%;
+  background-color: #4caf50;
+}
+
+.conversion-options {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.conversion-options select {
+  margin-right: 10px;
+}
+
