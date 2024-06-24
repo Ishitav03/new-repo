@@ -5,10 +5,14 @@ import './FileUpload.css'; // Ensure you have corresponding CSS styles for FileU
 const FileUpload = () => {
   const [file, setFile] = useState(null);
   const [fileType, setFileType] = useState('csv');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isPreparingFile, setIsPreparingFile] = useState(false); // State to track file preparation
+  const [uploadProgress, setUploadProgress] = useState(0); // State to track upload progress
+  const [isUploading, setIsUploading] = useState(false); // State to track if upload is in progress
 
   const handleFileChange = (event) => {
+    setIsPreparingFile(true); // Set state to indicate file preparation
     setFile(event.target.files[0]);
+    setIsPreparingFile(false); // Reset state after file is selected
   };
 
   const handleFileTypeChange = (event) => {
@@ -16,61 +20,51 @@ const FileUpload = () => {
   };
 
   const handleFileUpload = async () => {
-    setIsLoading(true);
+    setIsUploading(true);
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const fileContent = event.target.result;
-      const data = {
-        data: fileContent,
-        fileType: fileType,
-      };
+    const formData = new FormData();
+    formData.append('file', file);
 
-      try {
-        const response = await axios.post('http://localhost:8080/api/convert', data, {
-          responseType: 'blob',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
+    try {
+      const response = await axios.post('http://localhost:8080/api/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          const progress = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          setUploadProgress(progress);
+        },
+      });
 
-        let fileBlob;
-        switch (fileType) {
-          case 'excel':
-            fileBlob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-            break;
-          case 'csv':
-            fileBlob = new Blob([response.data], { type: 'text/csv' });
-            break;
-          case 'pdf':
-            fileBlob = new Blob([response.data], { type: 'application/pdf' });
-            break;
-          default:
-            console.error('Unsupported file type');
-            return;
-        }
+      // Assuming the backend returns a file ID or name
+      const fileName = response.data.fileName;
 
-        const fileURL = URL.createObjectURL(fileBlob);
-        const fileLink = document.createElement('a');
-        fileLink.href = fileURL;
-        fileLink.setAttribute('download', `file.${fileType}`);
-        document.body.appendChild(fileLink);
-        fileLink.click();
-        document.body.removeChild(fileLink);
+      const conversionResponse = await axios.post('http://localhost:8080/api/convert', {
+        fileName,
+        fileType,
+      }, {
+        responseType: 'blob',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-        setIsLoading(false);
-      } catch (error) {
-        setIsLoading(false);
-        alert('Error converting file. Please try again.');
-        console.error('Error converting file:', error.message);
-      }
-    };
+      const fileBlob = new Blob([conversionResponse.data], { type: `application/${fileType}` });
+      const fileURL = URL.createObjectURL(fileBlob);
+      const fileLink = document.createElement('a');
+      fileLink.href = fileURL;
+      fileLink.setAttribute('download', `file.${fileType}`);
+      document.body.appendChild(fileLink);
+      fileLink.click();
+      document.body.removeChild(fileLink);
 
-    if (file) {
-      reader.readAsText(file);
-    } else {
-      setIsLoading(false);
-      alert('Please select a file to upload.');
+      setIsUploading(false);
+      setUploadProgress(0);
+    } catch (error) {
+      setIsUploading(false);
+      setUploadProgress(0);
+      alert('Error uploading file. Please try again.');
+      console.error('Error uploading file:', error.message);
     }
   };
 
@@ -78,25 +72,49 @@ const FileUpload = () => {
     <div className="file-upload-container">
       <label className="file-upload-label">
         <input type="file" onChange={handleFileChange} className="file-input" />
-        {file ? (
-          <span className="file-selected">{file.name}</span>
-        ) : (
-          <span className="file-placeholder">Choose a file or drag it here</span>
+        {isPreparingFile && <span className="file-loading">Preparing file...</span>}
+        {file && (
+          <div className="file-details">
+            <span className="file-name">{file.name}</span>
+            <span className="file-size">{(file.size / 1024).toFixed(2)} KB</span>
+          </div>
+        )}
+        {!file && !isPreparingFile && (
+          <span className="file-placeholder">Drag and drop a file here or click to select</span>
         )}
       </label>
-      <select value={fileType} onChange={handleFileTypeChange} className="file-type-select">
-        <option value="csv">CSV</option>
-        <option value="pdf">PDF</option>
-        <option value="excel">Excel</option>
-      </select>
-      <button onClick={handleFileUpload} className="file-upload-button">
-        {isLoading ? 'Uploading...' : 'Upload'}
-      </button>
+      {file && (
+        <React.Fragment>
+          <select value={fileType} onChange={handleFileTypeChange} className="file-type-select">
+            <option value="csv">CSV</option>
+            <option value="pdf">PDF</option>
+            <option value="excel">Excel</option>
+          </select>
+          <button onClick={handleFileUpload} className="file-upload-button" disabled={isUploading}>
+            {isUploading ? 'Uploading...' : 'Upload'}
+          </button>
+          {isUploading && (
+            <div className="progress">
+              <div
+                className="progress-bar"
+                style={{ width: `${uploadProgress}%` }}
+                role="progressbar"
+                aria-valuenow={uploadProgress}
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                {uploadProgress}%
+              </div>
+            </div>
+          )}
+        </React.Fragment>
+      )}
     </div>
   );
 };
 
 export default FileUpload;
+
 
 
 
@@ -124,10 +142,21 @@ export default FileUpload;
   display: none;
 }
 
-.file-selected {
+.file-loading {
   display: block;
   font-size: 14px;
   margin-top: 10px;
+}
+
+.file-details {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.file-name,
+.file-size {
+  font-size: 14px;
 }
 
 .file-placeholder {
@@ -158,3 +187,25 @@ export default FileUpload;
   background-color: #ccc;
   cursor: not-allowed;
 }
+
+.progress {
+  width: 100%;
+  height: 20px;
+  background-color: #f2f2f2;
+  border-radius: 5px;
+  margin-top: 10px;
+}
+
+.progress-bar {
+  height: 100%;
+  line-height: 20px;
+  color: #fff;
+  text-align: center;
+  background-color: #007bff;
+  border-radius: 5px;
+}
+
+
+
+
+
