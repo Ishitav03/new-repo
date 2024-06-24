@@ -1,19 +1,21 @@
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import './FileUploadBox.css';
 
 const FileUploadBox = () => {
   const [files, setFiles] = useState([]);
+  const [fileType, setFileType] = useState('csv');
 
   const onDrop = useCallback((acceptedFiles) => {
     const updatedFiles = acceptedFiles.map((file) => ({
       file: file,
-      preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
-      size: (file.size / 1024).toFixed(2) + " KB",
+      preview: file.type.startsWith("image/")
+        ? URL.createObjectURL(file)
+        : null,
+      size: (file.size / 1024).toFixed(2) + " kb",
       progress: 0,
-      conversionType: 'csv',
-      status: 'pending',
+      status: 'pending'
     }));
 
     setFiles((prevFiles) => [...prevFiles, ...updatedFiles]);
@@ -27,7 +29,7 @@ const FileUploadBox = () => {
       const fileContent = event.target.result;
       const data = {
         data: fileContent,
-        fileType: fileObj.conversionType,
+        fileType: fileType,
       };
 
       try {
@@ -39,36 +41,35 @@ const FileUploadBox = () => {
         });
 
         let file;
-        if (fileObj.conversionType === 'excel') {
+        if(fileType === 'excel'){
           file = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        } else if (fileObj.conversionType === 'csv') {
-          file = new Blob([response.data], { type: 'text/csv' });
-        } else if (fileObj.conversionType === 'pdf') {
-          file = new Blob([response.data], { type: 'application/pdf' });
+        } else if(fileType === 'csv'){
+          file = new Blob([response.data], { type: `text/csv` });
+        } else if(fileType === 'pdf'){
+          file = new Blob([response.data], { type: `application/pdf` });
         }
 
+        // Create an URL for the file
         const fileURL = URL.createObjectURL(file);
+        // Create a temporary link to trigger the download
         const fileLink = document.createElement('a');
         fileLink.href = fileURL;
-        fileLink.setAttribute('download', `file.${fileObj.conversionType}`);
+        if(fileType === 'excel') {
+          fileLink.setAttribute('download', 'file.xlsx');
+        } else if(fileType === 'csv'){
+          fileLink.setAttribute('download', 'file.csv'); // or any other extension
+        } else if(fileType === 'pdf') {
+          fileLink.setAttribute('download', 'file.pdf');
+        }
         document.body.appendChild(fileLink);
         fileLink.click();
         document.body.removeChild(fileLink);
-
-        setFiles((prevFiles) => prevFiles.map((prevFile) =>
-          prevFile.file === fileObj.file ? { ...prevFile, progress: 100, status: 'uploaded' } : prevFile
-        ));
       } catch (error) {
-        setFiles((prevFiles) => prevFiles.map((prevFile) =>
-          prevFile.file === fileObj.file ? { ...prevFile, status: 'error' } : prevFile
-        ));
         alert('Invalid JSON');
       }
     };
 
-    if (fileObj.file) {
-      reader.readAsText(fileObj.file);
-    }
+    reader.readAsText(fileObj.file);
   };
 
   const handleConversionTypeChange = (file, conversionType) => {
@@ -79,7 +80,13 @@ const FileUploadBox = () => {
     );
   };
 
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    multiple: true,
+  });
+
   useEffect(() => {
+    // Clean up function to revoke object URLs
     return () => {
       files.forEach((file) => {
         if (file.preview) {
@@ -88,12 +95,6 @@ const FileUploadBox = () => {
       });
     };
   }, [files]);
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: '.json,application/json,text/plain',
-    multiple: true,
-  });
 
   return (
     <div className="upload-container">
@@ -105,45 +106,61 @@ const FileUploadBox = () => {
           <p>Drop JSON files here / Click to select JSON files</p>
         )}
       </div>
-      {files.map((fileObj) => (
-        <div className="file-container" key={fileObj.file.name}>
+      <div>
+        <select value={fileType} onChange={(e) => setFileType(e.target.value)}>
+          <option value="csv">CSV</option>
+          <option value="pdf">PDF</option>
+          <option value="excel">Excel</option>
+        </select>
+      </div>
+      {files.map((file) => (
+        <div className="file-container" key={file.file.name}>
           <div className="file-preview">
-            {fileObj.preview ? (
-              <img src={fileObj.preview} alt={fileObj.file.name} className="preview-image" />
+            {file.preview ? (
+              <img
+                src={file.preview}
+                alt={file.file.name}
+                className="preview-image"
+              />
             ) : (
               <div className="file-icon">
-                <p>{fileObj.file.name}</p>
+                <p>{file.file.name}</p>
               </div>
             )}
             <div className="file-details">
               <div className="file-detail">
-                <strong>Name:</strong> {fileObj.file.name}
+                <strong>Name:</strong> {file.file.name}
               </div>
               <div className="file-detail">
-                <strong>Size:</strong> {fileObj.size}
+                <strong>Size:</strong> {file.size}
               </div>
               <div className="file-detail">
-                <strong>Status:</strong> {fileObj.progress}%
+                <strong>Status:</strong> {file.progress}%
               </div>
               <div className="progress-bar">
-                <div className="progress" style={{ width: `${fileObj.progress}%` }}></div>
+                <div
+                  className="progress"
+                  style={{ width: `${file.progress}%` }}
+                ></div>
               </div>
             </div>
           </div>
-          {fileObj.status === 'uploaded' && (
-            <div className="conversion-options">
-              <label>Convert to:</label>
-              <select
-                value={fileObj.conversionType}
-                onChange={(e) => handleConversionTypeChange(fileObj.file, e.target.value)}
-              >
-                <option value="csv">CSV</option>
-                <option value="pdf">PDF</option>
-                <option value="excel">Excel</option>
-              </select>
-              <button onClick={() => uploadFile(fileObj)}>Convert</button>
-            </div>
-          )}
+          <div className="conversion-options">
+            <label>Convert to:</label>
+            <select
+              value={file.conversionType || ""}
+              onChange={(e) =>
+                handleConversionTypeChange(file.file, e.target.value)
+              }
+            >
+              <option value="">Select...</option>
+              <option value="csv">CSV</option>
+              <option value="txt">TXT</option>
+              <option value="xml">XML</option>
+              <option value="pdf">PDF</option>
+              <option value="doc">DOC</option>
+            </select>
+          </div>
         </div>
       ))}
     </div>
